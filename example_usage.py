@@ -3,6 +3,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import os
 import hashlib
+import time
 
 load_dotenv()
 
@@ -14,6 +15,9 @@ def calculate_file_sha256(file_path: str) -> str:
         for chunk in iter(lambda: f.read(4096), b''):
             sha256_hash.update(chunk)
     return sha256_hash.hexdigest()
+
+# Start timing
+start_time = time.time()
 
 # Get configuration from environment variables
 endpoint = os.getenv('OPENSEARCH_ENDPOINT')
@@ -31,7 +35,9 @@ db = BinDB(
 # db.delete_index()
 # db.create_index()
 
-latest_file = 'random_text.txt'
+# latest_file = 'random_text.txt'
+# latest_file = 'test.txt'
+latest_file = 'lorem.txt'
 binary_file_path = os.path.join('data', latest_file)
 
 # Calculate file hash
@@ -40,23 +46,28 @@ print(f"File SHA-256: {file_sha256}")
 print(f"Indexing file: {binary_file_path}")
 
 # Index the generated random binary file
-# db.index_binary_file(
-#     file_path=binary_file_path,
-#     file_sha256=file_sha256,
-#     min_size=4,
-#     max_size=8,
-#     batch_size=1000
-# ) 
+db.index_binary_file(
+    file_path=binary_file_path,
+    file_sha256=file_sha256,
+    min_size=8,
+    max_size=8,
+    batch_size=1000
+) 
+
+# Calculate and print total runtime
+end_time = time.time()
+total_time = end_time - start_time
+print(f"\nTotal runtime: {total_time:.2f} seconds")
 
 # Example usage
-ngram = "2f555762"
-results = db.search_by_ngram(ngram)
+# ngram = "2f555762"
+# results = db.search_by_ngram(ngram)
 
-# Print results
-for result in results:
-    print(f"File: {result['file_path']}")
-    print(f"SHA256: {result['file_sha256']}")
-    print(f"Offset: {result['offset']}")
-    print(f"Size: {result['size']}")
-    print(f"Match Score: {result['score']}")
-    print("---")
+# # Print results
+# for result in results:
+#     print(f"File: {result['file_path']}")
+#     print(f"SHA256: {result['file_sha256']}")
+#     print(f"Offset: {result['offset']}")
+#     print(f"Size: {result['size']}")
+#     print(f"Match Score: {result['score']}")
+#     print("---")

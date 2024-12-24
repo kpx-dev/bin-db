@@ -1,0 +1,4 @@
+1MB lorem.txt (ngram size 8):
+
+total ngrams: 1 048 569
+Insertion at 1k batch: 

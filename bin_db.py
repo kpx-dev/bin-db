@@ -2,6 +2,7 @@ import boto3
 from opensearchpy import OpenSearch, RequestsHttpConnection
 from requests_aws4auth import AWS4Auth
 import os
+import json
 from typing import List, Generator, Dict, Any
 import binascii
 
@@ -100,13 +101,13 @@ class BinDB:
                 ngram = binary_data[offset:offset + size]
                 yield (ngram, offset, size)
 
-    def _prepare_document(self, file_path: str, file_sha256: str, 
+    def _prepare_document(self, is_binary_file: bool, file_path: str, file_sha256: str, 
                          ngram: bytes, offset: int, size: int) -> Dict[str, Any]:
         """Prepare a document for indexing"""
         return {
             "file_path": file_path,
             "file_sha256": file_sha256,
-            "ngram": binascii.hexlify(ngram).decode('ascii'),
+            "ngram": binascii.hexlify(ngram).decode('ascii') if is_binary_file else str(ngram),
             "offset": offset,
             "size": size
         }
@@ -114,27 +115,56 @@ class BinDB:
     def index_binary_file(self, file_path: str, file_sha256: str, min_size: int = 4, 
                          max_size: int = 8, batch_size: int = 1000) -> None:
         """Index a binary file into OpenSearch"""
+        is_binary_file = self.is_binary_file(file_path)
+        
+        # Read file and calculate total ngrams for progress tracking
         with open(file_path, 'rb') as f:
             binary_data = f.read()
-
+        
+        data_length = len(binary_data)
+        total_ngrams = sum(data_length - size + 1 for size in range(min_size, max_size + 1))
+        processed_ngrams = 0
+        successful_docs = 0
+        
         bulk_data = []
+        print(f"\nProcessing file: {file_path}")
+        print(f"Total ngrams to process: {total_ngrams:,}")
         
         for ngram, offset, size in self.generate_ngrams(binary_data, min_size, max_size):
-            doc = self._prepare_document(file_path, file_sha256, ngram, offset, size)
+            doc = self._prepare_document(is_binary_file, file_path, file_sha256, ngram, offset, size)
             
             bulk_data.extend([
                 {"index": {"_index": self.index_name}},
                 doc
             ])
             
+            processed_ngrams += 1
+            
             if len(bulk_data) >= batch_size * 2:
                 res = self.client.bulk(body=bulk_data)
-                print("bulk insert res", res)
+                
+                # Count successful operations
+                if not res.get('errors', False):
+                    successful_docs += len(bulk_data) // 2
+                
+                # Print progress
+                progress = (processed_ngrams / total_ngrams) * 100
+                print(f"\rProgress: {processed_ngrams:,}/{total_ngrams:,} ngrams "
+                      f"({progress:.2f}%) - Successfully indexed: {successful_docs:,} docs", 
+                      end='', flush=True)
+                
                 bulk_data = []
         
+        # Process remaining documents
         if bulk_data:
             res = self.client.bulk(body=bulk_data)
-            print("bulk insert res", res)
+            if not res.get('errors', False):
+                successful_docs += len(bulk_data) // 2
+        
+        # Print final statistics
+        print(f"\nIndexing complete!")
+        print(f"Total ngrams processed: {processed_ngrams:,}")
+        print(f"Successfully indexed documents: {successful_docs:,}")
 
     def delete_index(self) -> None:
         """Delete specific index and its data"""
@@ -191,3 +221,54 @@ class BinDB:
         except Exception as e:
             print(f"Error searching for ngram: {str(e)}")
             return []
+
+    def is_binary_file(self, file_path: str, sample_size: int = 8192) -> bool:
+        """
+        Detect if a file is binary or text based on its content
+        
+        Args:
+            file_path: Path to the file to check
+            sample_size: Number of bytes to check (default: 8KB)
+            
+        Returns:
+            bool: True if file appears to be binary, False if it appears to be text
+        """
+        # Common binary file signatures (magic numbers)
+        BINARY_SIGNATURES = {
+            b'\x7fELF',  # ELF files
+            b'MZ',       # DOS/PE files
+            b'\x89PNG',  # PNG images
+            b'PK',       # ZIP files
+            b'\xff\xd8', # JPEG files
+            b'%PDF',     # PDF files
+        }
+        
+        try:
+            with open(file_path, 'rb') as f:
+                # Check first few bytes against known binary signatures
+                initial_bytes = f.read(4)
+                for signature in BINARY_SIGNATURES:
+                    if initial_bytes.startswith(signature):
+                        return True
+                
+                # Reset file pointer
+                f.seek(0)
+                # Read a chunk of the file
+                chunk = f.read(sample_size)
+                
+                # Check for NULL bytes and high number of non-printable characters
+                null_count = chunk.count(b'\x00')
+                if null_count > 0:
+                    return True
+                    
+                # Check if the chunk contains a high ratio of non-printable characters
+                # Excluding common text file characters like newlines and tabs
+                control_chars = sum(1 for byte in chunk 
+                                  if byte < 8 or byte > 13 and byte < 32 or byte > 126)
+                
+                # If more than 30% non-printable characters, likely binary
+                return (control_chars / len(chunk)) > 0.30
+                
+        except Exception as e:
+            print(f"Error checking file type: {str(e)}")
+            return False
