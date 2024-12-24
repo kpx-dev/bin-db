@@ -51,7 +51,7 @@ db.index_binary_file(
     file_sha256=file_sha256,
     min_size=8,
     max_size=8,
-    batch_size=1000
+    batch_size=10000
 ) 
 
 # Calculate and print total runtime
