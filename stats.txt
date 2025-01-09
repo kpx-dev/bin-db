@@ -1,4 +1,11 @@
-1MB lorem.txt (ngram size 8):
+1MB random_lorem_text (ngram size 8):
+Batch: 20k
+Total ngrams processed: 1,048,569
+Successfully indexed documents: 1,048,569
+Total runtime: 506.53 seconds
+----------
 
-total ngrams: 1 048 569
-Insertion at 1k batch: 
+Batch: 100k
+Total ngrams processed: 1,048,569
+Successfully indexed documents: 1,048,569
+Total runtime: 506.53 seconds

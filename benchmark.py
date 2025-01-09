@@ -35,9 +35,10 @@ db = BinDB(
 # db.delete_index()
 # db.create_index()
 
+latest_file = 'simple_text.txt'
 # latest_file = 'random_text.txt'
-# latest_file = 'test.txt'
-latest_file = 'lorem.txt'
+# latest_file = 'random_lorem_text.txt'
+# latest_file = 'random_binary.bin'
 binary_file_path = os.path.join('data', latest_file)
 
 # Calculate file hash
@@ -45,29 +46,41 @@ file_sha256 = calculate_file_sha256(binary_file_path)
 print(f"File SHA-256: {file_sha256}")
 print(f"Indexing file: {binary_file_path}")
 
-# Index the generated random binary file
-db.index_binary_file(
-    file_path=binary_file_path,
-    file_sha256=file_sha256,
-    min_size=8,
-    max_size=8,
-    batch_size=10000
-) 
+# db.index_entire_file(
+#     file_path=binary_file_path,
+#     file_sha256=file_sha256,
+#     min_size=8,
+#     max_size=8,
+#     batch_size=100000,
+#     # dry_run=True
+# )
 
+# Index the generated random binary file
+# db.index_binary_file(
+#     file_path=binary_file_path,
+#     file_sha256=file_sha256,
+#     min_size=8,
+#     max_size=8,
+#     batch_size=100000,
+#     # dry_run=True
+# ) 
+
+
+# # Example Lookup
+ngram = "his is ji"
+results = db.search_by_ngram(ngram)
+
+# Print results
+for result in results:
+    print(f"File: {result['file_path']}")
+    print(f"SHA256: {result['file_sha256']}")
+    print(f"Offset: {result['offset']}")
+    print(f"Size: {result['size']}")
+    print(f"Match Score: {result['score']}")
+    print("---")
+    
 # Calculate and print total runtime
 end_time = time.time()
 total_time = end_time - start_time
 print(f"\nTotal runtime: {total_time:.2f} seconds")
 
-# Example usage
-# ngram = "2f555762"
-# results = db.search_by_ngram(ngram)
-
-# # Print results
-# for result in results:
-#     print(f"File: {result['file_path']}")
-#     print(f"SHA256: {result['file_sha256']}")
-#     print(f"Offset: {result['offset']}")
-#     print(f"Size: {result['size']}")
-#     print(f"Match Score: {result['score']}")
-#     print("---")

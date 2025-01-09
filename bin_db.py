@@ -5,9 +5,10 @@ import os
 import json
 from typing import List, Generator, Dict, Any
 import binascii
+from botocore.config import Config
 
 class BinDB:
-    def __init__(self, collection_endpoint: str, region: str, index_name: str):
+    def __init__(self, collection_endpoint: str, region: str, index_name: str):        
         self.index_name = index_name
         self.client = self._initialize_client(collection_endpoint, region)
 
@@ -27,7 +28,10 @@ class BinDB:
             http_auth=aws_auth,
             use_ssl=True,
             verify_certs=True,
-            connection_class=RequestsHttpConnection
+            connection_class=RequestsHttpConnection,
+            timeout=10000,  # Timeout in seconds,
+            max_retries=3,
+            retry_on_timeout=True
         )
 
     @property
@@ -62,17 +66,18 @@ class BinDB:
     @property
     def _index_mappings(self) -> Dict[str, Any]:
         """Define index mappings"""
-        return {
+        
+        index_property = {
+            "type": "text",
+            "analyzer": "ngram_analyzer",
+            "fields": {
+                "raw": {"type": "keyword"}
+            }
+        }
+        payload = {
             "properties": {
                 "file_path": {"type": "keyword"},
                 "file_sha256": {"type": "keyword"},
-                "ngram": {
-                    "type": "text",
-                    "analyzer": "ngram_analyzer",
-                    "fields": {
-                        "raw": {"type": "keyword"}
-                    }
-                },
                 "offset": {"type": "long"},
                 "size": {"type": "integer"},
                 "content": {
@@ -81,6 +86,9 @@ class BinDB:
                 }
             }
         }
+        payload['properties'][self.index_name] = index_property
+
+        return payload
 
     def create_index(self) -> None:
         """Create the index with appropriate mappings for binary n-grams"""
@@ -104,18 +112,47 @@ class BinDB:
     def _prepare_document(self, is_binary_file: bool, file_path: str, file_sha256: str, 
                          ngram: bytes, offset: int, size: int) -> Dict[str, Any]:
         """Prepare a document for indexing"""
-        return {
+        body = binascii.hexlify(ngram).decode('ascii') if is_binary_file else str(ngram),
+        payload = {
             "file_path": file_path,
             "file_sha256": file_sha256,
-            "ngram": binascii.hexlify(ngram).decode('ascii') if is_binary_file else str(ngram),
             "offset": offset,
             "size": size
         }
+        payload[self.index_name] = body
+
+        return payload
+
+    def index_entire_file(self, file_path: str, file_sha256: str, min_size: int = 4, 
+                         max_size: int = 8, batch_size: int = 1000, dry_run: bool = False) -> None:
+        print("index_entire_file")
+        is_binary_file = self.is_binary_file(file_path)
+        print(f"Is binary file: {is_binary_file}")
+        
+        # Read file and calculate total ngrams for progress tracking
+        with open(file_path, 'rb') as f:
+            binary_data = f.read()
+        
+        bulk_data = []
+        offset = 0
+        size = 0
+        doc = self._prepare_document(is_binary_file, file_path, file_sha256, binary_data, offset, size)
+            
+        bulk_data.extend([
+            {"index": {"_index": self.index_name}},
+            doc
+        ])
+
+        res = self.client.bulk(body=bulk_data)
+        
+        # Print final statistics
+        print(f"\nIndexing complete!")
 
     def index_binary_file(self, file_path: str, file_sha256: str, min_size: int = 4, 
-                         max_size: int = 8, batch_size: int = 1000) -> None:
+                         max_size: int = 8, batch_size: int = 1000, dry_run: bool = False) -> None:
         """Index a binary file into OpenSearch"""
         is_binary_file = self.is_binary_file(file_path)
+        print(f"Is binary file: {is_binary_file}")
         
         # Read file and calculate total ngrams for progress tracking
         with open(file_path, 'rb') as f:
@@ -141,11 +178,12 @@ class BinDB:
             processed_ngrams += 1
             
             if len(bulk_data) >= batch_size * 2:
-                res = self.client.bulk(body=bulk_data)
+                if not dry_run:
+                    res = self.client.bulk(body=bulk_data)
                 
-                # Count successful operations
-                if not res.get('errors', False):
-                    successful_docs += len(bulk_data) // 2
+                    # Count successful operations
+                    if not res.get('errors', False):
+                        successful_docs += len(bulk_data) // 2
                 
                 # Print progress
                 progress = (processed_ngrams / total_ngrams) * 100
@@ -156,7 +194,7 @@ class BinDB:
                 bulk_data = []
         
         # Process remaining documents
-        if bulk_data:
+        if bulk_data and not dry_run:
             res = self.client.bulk(body=bulk_data)
             if not res.get('errors', False):
                 successful_docs += len(bulk_data) // 2
@@ -183,7 +221,7 @@ class BinDB:
         
         Args:
             ngram (bytes): The binary ngram to search for
-            size (int): Maximum number of results to return (default: 10)
+            size (int): Maximum number of results to return (default: 3)
             
         Returns:
             List[Dict[str, Any]]: List of matching documents with their details
@@ -193,11 +231,11 @@ class BinDB:
             # hex_ngram = binascii.hexlify(ngram).decode('ascii')
             
             # Construct the search query
+            match = {}
+            match[self.index_name] = ngram
             query = {
                 "query": {
-                    "match": {
-                        "ngram": ngram
-                    }
+                    "match": match
                 },
                 "size": size,
                 "_source": ["file_path", "file_sha256", "offset", "size"]
