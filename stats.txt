@@ -9,3 +9,4 @@ Batch: 100k
 Total ngrams processed: 1,048,569
 Successfully indexed documents: 1,048,569
 Total runtime: 506.53 seconds
+
