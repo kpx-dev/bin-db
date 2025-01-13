@@ -38,26 +38,26 @@ class BinDB:
     def _index_settings(self) -> Dict[str, Any]:
         """Define index settings"""
         return {
-            "index.max_ngram_diff": 4,
+            # "index.max_ngram_diff": 4,
             "analysis": {
                 "analyzer": {
                     "ngram_analyzer": {
                         "type": "custom",
                         "tokenizer": "ngram_tokenizer",
-                        "filter": ["lowercase"]
+                        # "filter": ["lowercase"]
                     }
                 },
                 "tokenizer": {
                     "ngram_tokenizer": {
                         "type": "ngram",
-                        "min_gram": 4,
+                        "min_gram": 8,
                         "max_gram": 8,
-                        "token_chars": [
-                            "letter",
-                            "digit",
-                            "punctuation",
-                            "symbol"
-                        ]
+                        # "token_chars": [
+                        #     "letter",
+                        #     "digit",
+                        #     "punctuation",
+                        #     "symbol"
+                        # ]
                     }
                 }
             }
@@ -71,7 +71,7 @@ class BinDB:
             "type": "text",
             "analyzer": "ngram_analyzer",
             "fields": {
-                "raw": {"type": "keyword"}
+                "raw": {"type": "text"}
             }
         }
         payload = {
@@ -143,7 +143,9 @@ class BinDB:
             doc
         ])
 
-        res = self.client.bulk(body=bulk_data)
+        if not dry_run:
+            res = self.client.bulk(body=bulk_data)
+            print('index result ', res)
         
         # Print final statistics
         print(f"\nIndexing complete!")
@@ -215,12 +217,12 @@ class BinDB:
         except Exception as e:
             print(f"Error deleting index: {str(e)}")
 
-    def search_by_ngram(self, ngram: str, size: int = 3) -> List[Dict[str, Any]]:
+    def search_by_ngram(self, ngram: str, size: int = 5) -> List[Dict[str, Any]]:
         """
         Search for documents containing the specified ngram
         
         Args:
-            ngram (bytes): The binary ngram to search for
+            ngram (str): The ngram to search for
             size (int): Maximum number of results to return (default: 3)
             
         Returns:
@@ -238,9 +240,12 @@ class BinDB:
                     "match": match
                 },
                 "size": size,
-                "_source": ["file_path", "file_sha256", "offset", "size"]
+                # "_source": ["lorem-index-full-file", "ngram", "file_path", "file_sha256", "offset", "size"]
             }
-            
+            source = ["file_path", "file_sha256", "offset", "size"]
+            source.append(self.index_name)
+            query['_source'] = source
+
             # Execute search
             response = self.client.search(
                 index=self.index_name,

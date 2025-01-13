@@ -33,12 +33,10 @@ db = BinDB(
     index_name=index_name
 )
 # db.delete_index()
-# db.create_index()
+db.create_index()
 
 latest_file = 'simple_text.txt'
-# latest_file = 'random_text.txt'
-# latest_file = 'random_lorem_text.txt'
-# latest_file = 'random_binary.bin'
+# latest_file = 'random_lorem_text_full_file.txt'
 binary_file_path = os.path.join('data', latest_file)
 
 # Calculate file hash
@@ -46,14 +44,14 @@ file_sha256 = calculate_file_sha256(binary_file_path)
 print(f"File SHA-256: {file_sha256}")
 print(f"Indexing file: {binary_file_path}")
 
-# db.index_entire_file(
-#     file_path=binary_file_path,
-#     file_sha256=file_sha256,
-#     min_size=8,
-#     max_size=8,
-#     batch_size=100000,
-#     # dry_run=True
-# )
+db.index_entire_file(
+    file_path=binary_file_path,
+    file_sha256=file_sha256,
+    min_size=8,
+    max_size=8,
+    batch_size=100000,
+    dry_run=True
+)
 
 # Index the generated random binary file
 # db.index_binary_file(
@@ -62,16 +60,21 @@ print(f"Indexing file: {binary_file_path}")
 #     min_size=8,
 #     max_size=8,
 #     batch_size=100000,
-#     # dry_run=True
+#     dry_run=True
 # ) 
 
 
-# # Example Lookup
-ngram = "his is ji"
+# Example Lookup
+ngram = "s a test"
 results = db.search_by_ngram(ngram)
 
 # Print results
 for result in results:
+    # print(result)
+    # print(type(result[index_name][0]))
+    # print(result[index_name][0])
+    # exit()
+    print(f"ngram: {result[index_name][0]}")
     print(f"File: {result['file_path']}")
     print(f"SHA256: {result['file_sha256']}")
     print(f"Offset: {result['offset']}")
