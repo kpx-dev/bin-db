@@ -173,12 +173,15 @@ class OpenSearchNGramHandler:
                     # "prefix": {
                     #     "content": ngram
                     # },
-                    "term": {  # exact match, but should use match instead of text type
-                        "content": ngram
-                    },
-                    # "match": {  # exact match, but should use match instead of text type
+                    # "term": {  # exact match, but should use match instead of text type
                     #     "content": ngram
-                    # }
+                    # },
+                    "match": {  # exact match, but should use match instead of text type
+                        "content": {
+                            "query": ngram,
+                            "analyzer": "ngram_analyzer"
+                        }
+                    }
                 },
                 "highlight": {
                     "fields": {
@@ -257,7 +260,7 @@ def main():
     handler = OpenSearchNGramHandler(host)
     index_name = "ngram_test_1"
 
-    # handler.client.indices.delete(index=index_name)
+    handler.client.indices.delete(index=index_name)
     handler.create_index(index_name)
 
     response = handler.client.count(index=index_name)
@@ -274,7 +277,7 @@ def main():
     # res = handler.insert_bulk(index_name, file_size=0.1, batch_size=1)
 
     # Search for a sample ngram
-    ngram = "i lo"
+    ngram = "hell"
     # ngram = "nhar"
     results = handler.search_ngram(ngram, index_name)
     print(f"\nSearch results for ngram '{ngram}':")
