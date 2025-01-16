@@ -38,26 +38,21 @@ class BinDB:
     def _index_settings(self) -> Dict[str, Any]:
         """Define index settings"""
         return {
-            # "index.max_ngram_diff": 4,
+            "index.max_ngram_diff": 8,  # Allow larger difference between min and max gram
             "analysis": {
                 "analyzer": {
                     "ngram_analyzer": {
                         "type": "custom",
                         "tokenizer": "ngram_tokenizer",
-                        # "filter": ["lowercase"]
+                        "filter": ["lowercase"]
                     }
                 },
                 "tokenizer": {
                     "ngram_tokenizer": {
                         "type": "ngram",
-                        "min_gram": 8,
-                        "max_gram": 8,
-                        # "token_chars": [
-                        #     "letter",
-                        #     "digit",
-                        #     "punctuation",
-                        #     "symbol"
-                        # ]
+                        "min_gram": 4,  # Minimum n-gram size
+                        "max_gram": 8,  # Maximum n-gram size
+                        "token_chars": []  # Empty array means tokenize everything
                     }
                 }
             }
@@ -66,29 +61,20 @@ class BinDB:
     @property
     def _index_mappings(self) -> Dict[str, Any]:
         """Define index mappings"""
-        
-        index_property = {
-            "type": "text",
-            "analyzer": "ngram_analyzer",
-            "fields": {
-                "raw": {"type": "text"}
-            }
-        }
-        payload = {
+        return {
             "properties": {
                 "file_path": {"type": "keyword"},
                 "file_sha256": {"type": "keyword"},
-                "offset": {"type": "long"},
-                "size": {"type": "integer"},
+                "is_binary": {"type": "boolean"},
                 "content": {
                     "type": "text",
-                    "analyzer": "ngram_analyzer"
+                    "analyzer": "ngram_analyzer",
+                    "search_analyzer": "standard",
+                    "term_vector": "with_positions_offsets_payloads",
+                    "index_options": "positions"
                 }
             }
         }
-        payload['properties'][self.index_name] = index_property
-
-        return payload
 
     def create_index(self) -> None:
         """Create the index with appropriate mappings for binary n-grams"""
@@ -98,6 +84,11 @@ class BinDB:
                 "mappings": self._index_mappings
             }
             self.client.indices.create(index=self.index_name, body=mapping)
+            print("Created index with mapping:", json.dumps(mapping, indent=2))
+        else:
+            # Get and print current mapping
+            current_mapping = self.client.indices.get_mapping(index=self.index_name)
+            print("Current index mapping:", json.dumps(current_mapping, indent=2))
 
     def generate_ngrams(self, binary_data: bytes, min_size: int = 4, 
                        max_size: int = 8) -> Generator[tuple, None, None]:
@@ -125,30 +116,63 @@ class BinDB:
 
     def index_entire_file(self, file_path: str, file_sha256: str, min_size: int = 4, 
                          max_size: int = 8, batch_size: int = 1000, dry_run: bool = False) -> None:
-        print("index_entire_file")
+        """Index an entire file into OpenSearch with automatic n-gram tokenization"""
+        print("Indexing entire file...")
         is_binary_file = self.is_binary_file(file_path)
         print(f"Is binary file: {is_binary_file}")
         
-        # Read file and calculate total ngrams for progress tracking
+        # Read file content
         with open(file_path, 'rb') as f:
             binary_data = f.read()
         
-        bulk_data = []
-        offset = 0
-        size = 0
-        doc = self._prepare_document(is_binary_file, file_path, file_sha256, binary_data, offset, size)
-            
-        bulk_data.extend([
-            {"index": {"_index": self.index_name}},
-            doc
-        ])
+        # For binary files, convert each byte to hex representation
+        # For text files, decode as UTF-8
+        if is_binary_file:
+            hex_content = ''
+            for byte in binary_data:
+                hex_content += f'{byte:02x}'
+            content = hex_content
+        else:
+            content = binary_data.decode('utf-8', errors='ignore')
+        
+        # Prepare the document
+        doc = {
+            "file_path": file_path,
+            "file_sha256": file_sha256,
+            "content": content,
+            "is_binary": is_binary_file
+        }
+
+        print(f"Indexing document with ID (SHA256): {file_sha256}")
+        print("Document content length:", len(content))
 
         if not dry_run:
-            res = self.client.bulk(body=bulk_data)
-            print('index result ', res)
+            try:
+                # Use file_sha256 as document ID
+                res = self.client.index(
+                    index=self.index_name,
+                    id=file_sha256,
+                    body=doc
+                )
+                print('Indexing result:', json.dumps(res, indent=2))
+
+                # Refresh the index to make the document searchable
+                self.client.indices.refresh(index=self.index_name)
+
+                # Verify the document was indexed
+                try:
+                    verify = self.client.get(
+                        index=self.index_name,
+                        id=file_sha256
+                    )
+                    print("Document verification:", json.dumps(verify, indent=2))
+                except Exception as e:
+                    print(f"Error verifying document: {str(e)}")
+
+            except Exception as e:
+                print(f"Error indexing file: {str(e)}")
         
-        # Print final statistics
-        print(f"\nIndexing complete!")
+        print("Indexing complete!")
 
     def index_binary_file(self, file_path: str, file_sha256: str, min_size: int = 4, 
                          max_size: int = 8, batch_size: int = 1000, dry_run: bool = False) -> None:
@@ -217,34 +241,38 @@ class BinDB:
         except Exception as e:
             print(f"Error deleting index: {str(e)}")
 
-    def search_by_ngram(self, ngram: str, size: int = 5) -> List[Dict[str, Any]]:
+    def search_by_ngram(self, ngram: str, size: int = 2) -> List[Dict[str, Any]]:
         """
         Search for documents containing the specified ngram
-        
-        Args:
-            ngram (str): The ngram to search for
-            size (int): Maximum number of results to return (default: 3)
-            
-        Returns:
-            List[Dict[str, Any]]: List of matching documents with their details
         """
         try:
-            # Convert binary ngram to hex string for searching
-            # hex_ngram = binascii.hexlify(ngram).decode('ascii')
-            
-            # Construct the search query
-            match = {}
-            match[self.index_name] = ngram
+            # If the search term is binary, convert it to hex
+            if isinstance(ngram, bytes):
+                search_term = binascii.hexlify(ngram).decode('ascii')
+            else:
+                search_term = ngram
+
+            print(f"Searching for term: {search_term}")
+
+            # First, perform the search
             query = {
                 "query": {
-                    "match": match
+                    "match_phrase": {
+                        "content": search_term
+                    }
                 },
                 "size": size,
-                # "_source": ["lorem-index-full-file", "ngram", "file_path", "file_sha256", "offset", "size"]
+                "_source": ["file_path", "file_sha256", "is_binary"],
+                "term_statistics": True,
+                "field_statistics": True,
+                "positions": True,
+                "offsets": True,
+                "filter": {
+                    "max_num_terms": 100
+                }
             }
-            source = ["file_path", "file_sha256", "offset", "size"]
-            source.append(self.index_name)
-            query['_source'] = source
+
+            print("Search query:", json.dumps(query, indent=2))
 
             # Execute search
             response = self.client.search(
@@ -252,16 +280,64 @@ class BinDB:
                 body=query
             )
             
-            # Extract and format results
+            print("Search response:", json.dumps(response, indent=2))
+            
             results = []
             for hit in response['hits']['hits']:
-                result = hit['_source']
-                result['score'] = hit['_score']
+                source = hit['_source']
+                doc_id = hit['_id']
+                
+                # Get term vectors for this document
+                tv_response = self.client.termvectors(
+                    index=self.index_name,
+                    id=doc_id,
+                    fields=['content'],
+                    positions=True,
+                    offsets=True,
+                    payloads=True,
+                    term_statistics=True,
+                    field_statistics=True,
+                    body={
+                        "fields": ["content"],
+                        "offsets": True,
+                        "positions": True,
+                        "term_statistics": True,
+                        "field_statistics": True
+                    }
+                )
+                
+                print("Term vectors response:", json.dumps(tv_response, indent=2))
+                
+                # Extract matches from term vectors
+                matches = []
+                if ('term_vectors' in tv_response and 
+                    'content' in tv_response['term_vectors'] and 
+                    'terms' in tv_response['term_vectors']['content']):
+                    
+                    terms = tv_response['term_vectors']['content']['terms']
+                    for term, term_info in terms.items():
+                        if 'tokens' in term_info:
+                            for token in term_info['tokens']:
+                                matches.append({
+                                    'start_offset': token.get('start_offset'),
+                                    'end_offset': token.get('end_offset'),
+                                    'position': token.get('position'),
+                                    'value': term
+                                })
+
+                result = {
+                    'file_path': source['file_path'],
+                    'file_sha256': source['file_sha256'],
+                    'score': hit['_score'],
+                    'matches': matches,
+                    'is_binary': source.get('is_binary', False)
+                }
                 results.append(result)
                 
             return results
             
         except Exception as e:
+            print(e)
             print(f"Error searching for ngram: {str(e)}")
             return []
 

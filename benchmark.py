@@ -32,8 +32,8 @@ db = BinDB(
     region=region,
     index_name=index_name
 )
-# db.delete_index()
-db.create_index()
+db.delete_index()
+# db.create_index()
 
 latest_file = 'simple_text.txt'
 # latest_file = 'random_lorem_text_full_file.txt'
@@ -65,7 +65,7 @@ db.index_entire_file(
 
 
 # Example Lookup
-ngram = "s a test"
+ngram = "world th"
 results = db.search_by_ngram(ngram)
 
 # Print results
@@ -74,16 +74,15 @@ for result in results:
     # print(type(result[index_name][0]))
     # print(result[index_name][0])
     # exit()
-    print(f"ngram: {result[index_name][0]}")
+    # print(f"Content: {result['content']}")
     print(f"File: {result['file_path']}")
     print(f"SHA256: {result['file_sha256']}")
-    print(f"Offset: {result['offset']}")
-    print(f"Size: {result['size']}")
+    # print(f"Offset: {result['offset']}")
+    # print(f"Size: {result['size']}")
     print(f"Match Score: {result['score']}")
-    print("---")
+    print('--------')
     
 # Calculate and print total runtime
 end_time = time.time()
 total_time = end_time - start_time
 print(f"\nTotal runtime: {total_time:.2f} seconds")
-
