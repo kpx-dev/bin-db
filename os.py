@@ -77,6 +77,9 @@ class OpenSearchNGramHandler:
                 }
             },
             "mappings": {
+                "_source": {
+                    "enabled": False
+                },
                 "properties": {
                     "content": {
                         "type": "text",
@@ -84,6 +87,8 @@ class OpenSearchNGramHandler:
                         "analyzer": "ngram_analyzer",
                         # "term_vector": "with_positions_offsets",
                         "term_vector": "with_positions_offsets_payloads",
+                        "store": False,
+                        "index": True
                     }
                 }
             }
@@ -115,9 +120,11 @@ class OpenSearchNGramHandler:
             if len(bulk_data) >= batch_size:
                 try:
                     print('about to bulk insert # files: ', len(bulk_data))
+                    print(bulk_data)
                     # Use the bulk API to insert all actions at once
                     response = self.client.bulk(index=index_name, body=bulk_data)
                     print(f"Bulk insert response: {response}")
+                    exit()
                     file_inserted += len(bulk_data)
                     print('File inserted...', file_inserted)
                     bulk_data = []
@@ -157,21 +164,21 @@ class OpenSearchNGramHandler:
             print(f"Error indexing file: {str(e)}")
             return None
 
-    def search_ngram(self, ngram, index_name="content"):
+    def search_ngram(self, ngram, index_name):
         """Search for a specific ngram and return its offsets"""
         try:
             query = {
-                "size": 1,
+                "size": 2,
                 "query": {
                     # "prefix": {
                     #     "content": ngram
                     # },
-                    # "term": {  # exact match, but should use match instead of text type
-                    #     "content": ngram
-                    # },
-                    "match": {  # exact match, but should use match instead of text type
+                    "term": {  # exact match, but should use match instead of text type
                         "content": ngram
-                    }
+                    },
+                    # "match": {  # exact match, but should use match instead of text type
+                    #     "content": ngram
+                    # }
                 },
                 "highlight": {
                     "fields": {
@@ -257,17 +264,18 @@ def main():
     print("total doc count ", response['count'])
 
     # Insert file
+    sample_file = 'data/simple_text.txt'
     # sample_file = 'data/random_lorem_text_small.txt'
-    sample_file = 'data/random_lorem_text_full.txt'
+    # sample_file = 'data/random_lorem_text_full.txt'
     
     insert_res = handler.insert_file(sample_file, index_name)
     print("insert single file result: ", json.dumps(insert_res, indent=2))
 
-    res = handler.insert_bulk(index_name, file_size=7, batch_size=20)
+    # res = handler.insert_bulk(index_name, file_size=0.1, batch_size=1)
 
     # Search for a sample ngram
-    # ngram = "I Love O"
-    ngram = "Provident possimus sed officiis"
+    ngram = "i lo"
+    # ngram = "nhar"
     results = handler.search_ngram(ngram, index_name)
     print(f"\nSearch results for ngram '{ngram}':")
     for result in results:
