@@ -1,5 +1,0 @@
-File SHA-256: 317e8e6d459e1e8ef49cb3f127ba2f0328c65fdc0a5d6a11b5c339ba5be7dbc8
-Indexing file: data/lorem.txt
-
-Processing file: data/lorem.txt
-Total ngrams to process: 1,048,569

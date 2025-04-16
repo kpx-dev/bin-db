@@ -77,9 +77,9 @@ class OpenSearchNGramHandler:
                 }
             },
             "mappings": {
-                "_source": {
-                    "enabled": False
-                },
+                # "_source": {
+                #     "enabled": False
+                # },
                 "properties": {
                     "content": {
                         "type": "text",
@@ -87,8 +87,8 @@ class OpenSearchNGramHandler:
                         "analyzer": "ngram_analyzer",
                         # "term_vector": "with_positions_offsets",
                         "term_vector": "with_positions_offsets_payloads",
-                        "store": False,
-                        "index": True
+                        # "store": False,
+                        # "index": True
                     }
                 }
             }
@@ -124,7 +124,7 @@ class OpenSearchNGramHandler:
                     # Use the bulk API to insert all actions at once
                     response = self.client.bulk(index=index_name, body=bulk_data)
                     print(f"Bulk insert response: {response}")
-                    exit()
+                    # exit()
                     file_inserted += len(bulk_data)
                     print('File inserted...', file_inserted)
                     bulk_data = []
@@ -258,26 +258,26 @@ def main():
     # host = 'search-binzilla-stateful-mtn7aicg2or3esk7runujwyrsu.aos.us-east-1.on.aws' # Medium Provisioned
     host = 'search-binzilla-loadtest-ritbkgju6slanvjgs7l33geoli.us-east-1.es.amazonaws.com' # Prod Load Test
     handler = OpenSearchNGramHandler(host)
-    index_name = "ngram_test_1"
+    index_name = "ngram_index_1"
 
-    handler.client.indices.delete(index=index_name)
+    # handler.client.indices.delete(index=index_name)
     handler.create_index(index_name)
 
     response = handler.client.count(index=index_name)
     print("total doc count ", response['count'])
 
     # Insert file
-    sample_file = 'data/simple_text.txt'
+    # sample_file = 'data/simple_text.txt'
     # sample_file = 'data/random_lorem_text_small.txt'
-    # sample_file = 'data/random_lorem_text_full.txt'
+    sample_file = 'data/random_lorem_text_full.txt'
     
-    insert_res = handler.insert_file(sample_file, index_name)
-    print("insert single file result: ", json.dumps(insert_res, indent=2))
+    # insert_res = handler.insert_file(sample_file, index_name)
+    # print("insert single file result: ", json.dumps(insert_res, indent=2))
 
-    # res = handler.insert_bulk(index_name, file_size=0.1, batch_size=1)
+    # res = handler.insert_bulk(index_name, file_size=1, batch_size=2)
 
     # Search for a sample ngram
-    ngram = "hell"
+    ngram = "ello"
     # ngram = "nhar"
     results = handler.search_ngram(ngram, index_name)
     print(f"\nSearch results for ngram '{ngram}':")

@@ -62,11 +62,16 @@ if __name__ == "__main__":
     # Get current timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    # Generate a random text file in the data folder
-    text_path = os.path.join('data', f'random_text_{timestamp}.txt')
-    generate_random_text_file(text_path, 1) 
+    file_path = 'data/random_binary_file.bin'
+    generate_random_binary_file(file_path, 10)
+    file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+    print(f"File size: {file_size_mb:.2f} MB")
 
-    text_size_mb = os.path.getsize(text_path) / (1024 * 1024)
-    print(f"Text file size: {text_size_mb:.2f} MB")
+    # Generate a random text file in the data folder
+    # text_path = os.path.join('data', f'random_text_{timestamp}.txt')
+    # generate_random_text_file(text_path, 1) 
+
+    # text_size_mb = os.path.getsize(text_path) / (1024 * 1024)
+    # print(f"Text file size: {text_size_mb:.2f} MB")
     
     print("\n" + "="*50 + "\n")

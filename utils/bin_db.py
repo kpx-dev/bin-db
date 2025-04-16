@@ -1,11 +1,9 @@
 import boto3
 from opensearchpy import OpenSearch, RequestsHttpConnection
 from requests_aws4auth import AWS4Auth
-import os
 import json
 from typing import List, Generator, Dict, Any
 import binascii
-from botocore.config import Config
 
 class BinDB:
     def __init__(self, collection_endpoint: str, region: str, index_name: str):        
@@ -38,19 +36,19 @@ class BinDB:
     def _index_settings(self) -> Dict[str, Any]:
         """Define index settings"""
         return {
-            "index.max_ngram_diff": 8,  # Allow larger difference between min and max gram
+            "index.max_ngram_diff": 0,  # Allow larger difference between min and max gram
             "analysis": {
                 "analyzer": {
                     "ngram_analyzer": {
                         "type": "custom",
                         "tokenizer": "ngram_tokenizer",
-                        "filter": ["lowercase"]
+                        # "filter": ["lowercase"]
                     }
                 },
                 "tokenizer": {
                     "ngram_tokenizer": {
                         "type": "ngram",
-                        "min_gram": 4,  # Minimum n-gram size
+                        "min_gram": 8,  # Minimum n-gram size
                         "max_gram": 8,  # Maximum n-gram size
                         "token_chars": []  # Empty array means tokenize everything
                     }
@@ -114,61 +112,44 @@ class BinDB:
 
         return payload
 
-    def index_entire_file(self, file_path: str, file_sha256: str, min_size: int = 4, 
+    def index_text_file(self, file_path: str, file_sha256: str, min_size: int = 8, 
                          max_size: int = 8, batch_size: int = 1000, dry_run: bool = False) -> None:
         """Index an entire file into OpenSearch with automatic n-gram tokenization"""
-        print("Indexing entire file...")
-        is_binary_file = self.is_binary_file(file_path)
-        print(f"Is binary file: {is_binary_file}")
+        print("Indexing text file...")
         
         # Read file content
-        with open(file_path, 'rb') as f:
-            binary_data = f.read()
-        
-        # For binary files, convert each byte to hex representation
-        # For text files, decode as UTF-8
-        if is_binary_file:
-            hex_content = ''
-            for byte in binary_data:
-                hex_content += f'{byte:02x}'
-            content = hex_content
-        else:
-            content = binary_data.decode('utf-8', errors='ignore')
+        with open(file_path, 'r') as f:
+            file_data = f.read()
         
         # Prepare the document
         doc = {
             "file_path": file_path,
             "file_sha256": file_sha256,
-            "content": content,
-            "is_binary": is_binary_file
+            "content": file_data,
+            # "is_binary": False
         }
 
         print(f"Indexing document with ID (SHA256): {file_sha256}")
-        print("Document content length:", len(content))
+        print("Document content length:", len(file_data))
 
         if not dry_run:
             try:
-                # Use file_sha256 as document ID
                 res = self.client.index(
                     index=self.index_name,
                     id=file_sha256,
                     body=doc
                 )
-                print('Indexing result:', json.dumps(res, indent=2))
 
+                print('Indexing result:', json.dumps(res, indent=2))
                 # Refresh the index to make the document searchable
-                self.client.indices.refresh(index=self.index_name)
+                # self.client.indices.refresh(index=self.index_name)
 
                 # Verify the document was indexed
-                try:
-                    verify = self.client.get(
-                        index=self.index_name,
-                        id=file_sha256
-                    )
-                    print("Document verification:", json.dumps(verify, indent=2))
-                except Exception as e:
-                    print(f"Error verifying document: {str(e)}")
-
+                # verify = self.client.get(
+                #         index=self.index_name,
+                #         id=file_sha256
+                # )
+                # print("Document verification:", json.dumps(verify, indent=2))
             except Exception as e:
                 print(f"Error indexing file: {str(e)}")
         
@@ -338,6 +319,64 @@ class BinDB:
             
         except Exception as e:
             print(e)
+            print(f"Error searching for ngram: {str(e)}")
+            return []
+
+    def search_aoss_by_ngram(self, ngram: str, size: int = 2) -> List[Dict[str, Any]]:
+        """
+        Search for documents containing the specified ngram
+        """
+        try:
+            print(f"Searching for term: {ngram}")
+
+            # First, perform the search
+            query = {
+                "query": {
+                    "term": {
+                        "content": ngram
+                    }
+                },
+                # "size": size,
+                # "_source": ["file_path", "file_sha256"],
+                # "term_statistics": True,
+                # "field_statistics": True,
+                # "positions": True,
+                # "offsets": True,
+                # "filter": {
+                #     "max_num_terms": 100
+                # }
+            }
+
+            print("Search query:", json.dumps(query, indent=2))
+
+            # Execute search
+            response = self.client.search(
+                index=self.index_name,
+                body=query
+            )
+            
+            print("Search response:", json.dumps(response, indent=2))
+            
+            results = []
+            for hit in response['hits']['hits']:
+                source = hit['_source']
+                doc_id = hit['_id']
+                
+                
+                # Extract matches from term vectors
+                # matches = []
+                result = {
+                    'file_path': source['file_path'],
+                    'file_sha256': source['file_sha256'],
+                    'score': hit['_score'],
+                    # 'matches': matches,
+                    # 'is_binary': source.get('is_binary', False)
+                }
+                results.append(result)
+                
+            return results
+            
+        except Exception as e:
             print(f"Error searching for ngram: {str(e)}")
             return []
 

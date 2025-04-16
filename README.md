@@ -1,6 +1,3 @@
 # bin-db
-Binary full text search db demo
 
-### Arch
-
-![arch](docs/arch.png)
+Demo repo to show how to do a "full text search" for binary file using 4 bytes ngram.
