@@ -59,13 +59,22 @@ def generate_random_text_file(file_path: str, size_mb: int = 10):
     print(f"File size: {actual_size / (1024 * 1024):.2f} MB")
 
 if __name__ == "__main__":
-    # Get current timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Create data directory if it doesn't exist
+    os.makedirs('data', exist_ok=True)
     
-    file_path = 'data/random_binary_file.bin'
-    generate_random_binary_file(file_path, 10)
-    file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
-    print(f"File size: {file_size_mb:.2f} MB")
+    # Generate 10MB file by default
+    size_mb = 10
+    file_name = f"random_binary_file_{size_mb}MB.bin"
+    file_path = os.path.join('data', file_name)
+    
+    print(f"Generating {size_mb}MB random binary file...")
+    generate_random_binary_file(file_path, size_mb)
+    
+    # Get actual file size
+    actual_size = os.path.getsize(file_path)
+    actual_size_mb = actual_size / (1024 * 1024)
+    print(f"Generated random binary file at: {file_path}")
+    print(f"File size: {actual_size_mb:.2f} MB")
 
     # Generate a random text file in the data folder
     # text_path = os.path.join('data', f'random_text_{timestamp}.txt')

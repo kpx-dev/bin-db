@@ -1,15 +1,14 @@
-import json
-import struct
 import boto3
+from opensearchpy import OpenSearch, RequestsHttpConnection
+from requests_aws4auth import AWS4Auth
+import json
+from typing import List, Generator, Dict, Any
+import binascii
 import os
 from dotenv import load_dotenv
-from opensearchpy import OpenSearch, RequestsHttpConnection
-from opensearchpy.helpers import bulk
-from requests_aws4auth import AWS4Auth
-from typing import List, Generator, Dict, Any
 
-class PackedIntegersDB:
-    def __init__(self, index_name: str = "packed-integers"):
+class BinDB:
+    def __init__(self, index_name: str = "binary-ngrams"):        
         self.index_name = index_name
         self.client = self._initialize_client()
 
@@ -40,64 +39,64 @@ class PackedIntegersDB:
             timeout=10000
         )
 
-    def create_index(self) -> None:
-        """Create the index with appropriate mappings for packed integers"""
-        index_definition = {
-            "settings": {
-                "analysis": {
-                    "tokenizer": {
-                        "ngram_tokenizer": {
-                            "type": "ngram",
-                            "min_gram": 4,
-                            "max_gram": 4
-                        }
-                    },
-                    "analyzer": {
-                        "ngram_analyzer": {
-                            "type": "custom",
-                            "tokenizer": "ngram_tokenizer"
-                        }
+    @property
+    def _index_settings(self) -> Dict[str, Any]:
+        """Define index settings for 4-byte ngrams"""
+        return {
+            "index.max_ngram_diff": 0,
+            "analysis": {
+                "analyzer": {
+                    "ngram_analyzer": {
+                        "type": "custom",
+                        "tokenizer": "ngram_tokenizer"
                     }
-                }
-            },
-            "mappings": {
-                "properties": {
-                    "file_path": {"type": "keyword"},
-                    "file_sha256": {"type": "keyword"},
-                    "offset": {"type": "long"},
-                    "packed_ngram": {
-                        "type": "long"  # Store 4-byte ngrams as 64-bit integers
+                },
+                "tokenizer": {
+                    "ngram_tokenizer": {
+                        "type": "ngram",
+                        "min_gram": 8,  # 4 bytes = 8 hex characters
+                        "max_gram": 8,
+                        "token_chars": []
                     }
                 }
             }
         }
 
+    @property
+    def _index_mappings(self) -> Dict[str, Any]:
+        """Define index mappings"""
+        return {
+            "properties": {
+                "file_path": {"type": "keyword"},
+                "file_sha256": {"type": "keyword"},
+                "offset": {"type": "long"},
+                "hex_ngram": {
+                    "type": "text",
+                    "analyzer": "ngram_analyzer",
+                    "search_analyzer": "standard"
+                }
+            }
+        }
+
+    def create_index(self) -> None:
+        """Create the index with appropriate mappings for binary n-grams"""
         if not self.client.indices.exists(self.index_name):
-            response = self.client.indices.create(
-                index=self.index_name,
-                body=index_definition
-            )
-            if response.get('acknowledged', False):
-                print("Index created successfully!")
-            else:
-                print(f"Error creating index: {response}")
+            mapping = {
+                "settings": self._index_settings,
+                "mappings": self._index_mappings
+            }
+            self.client.indices.create(index=self.index_name, body=mapping)
+            print("Created index with mapping:", json.dumps(mapping, indent=2))
 
     def generate_ngrams(self, binary_data: bytes) -> Generator[tuple, None, None]:
         """Generate 4-byte ngrams from binary data with step size 1"""
-        for offset in range(len(binary_data) - 3):  # -3 to ensure 4 bytes
+        data_length = len(binary_data)
+        for offset in range(data_length - 3):  # -3 to ensure 4 bytes
             ngram = binary_data[offset:offset + 4]
             yield (ngram, offset)
 
-    def pack_ngram(self, ngram: bytes) -> int:
-        """Convert 4-byte ngram to packed 64-bit integer"""
-        return struct.unpack(">Q", ngram.ljust(8, b'\0'))[0]
-
-    def unpack_ngram(self, packed_int: int) -> bytes:
-        """Convert packed 64-bit integer back to 4-byte ngram"""
-        return struct.pack(">Q", packed_int)[:4]
-
     def index_binary_file(self, file_path: str, file_sha256: str, batch_size: int = 1000) -> None:
-        """Index a binary file into OpenSearch using packed integers"""
+        """Index a binary file into OpenSearch"""
         print(f"\nProcessing file: {file_path}")
         
         # Read file and calculate total ngrams for progress tracking
@@ -112,14 +111,14 @@ class PackedIntegersDB:
         print(f"Total ngrams to process: {total_ngrams:,}")
         
         for ngram, offset in self.generate_ngrams(binary_data):
-            # Convert 4 bytes to packed integer
-            packed_int = self.pack_ngram(ngram)
+            # Convert 4 bytes to hex
+            hex_ngram = binascii.hexlify(ngram).decode('ascii')
             
             doc = {
                 "file_path": file_path,
                 "file_sha256": file_sha256,
                 "offset": offset,
-                "packed_ngram": packed_int
+                "hex_ngram": hex_ngram
             }
             
             bulk_data.extend([
@@ -130,8 +129,9 @@ class PackedIntegersDB:
             processed_ngrams += 1
             
             if len(bulk_data) >= batch_size * 2:
-                success, failed = bulk(self.client, bulk_data)
-                successful_docs += success
+                res = self.client.bulk(body=bulk_data)
+                if not res.get('errors', False):
+                    successful_docs += len(bulk_data) // 2
                 
                 # Print progress
                 progress = (processed_ngrams / total_ngrams) * 100
@@ -143,8 +143,9 @@ class PackedIntegersDB:
         
         # Process remaining documents
         if bulk_data:
-            success, failed = bulk(self.client, bulk_data)
-            successful_docs += success
+            res = self.client.bulk(body=bulk_data)
+            if not res.get('errors', False):
+                successful_docs += len(bulk_data) // 2
         
         print(f"\nIndexing complete!")
         print(f"Total ngrams processed: {processed_ngrams:,}")
@@ -153,14 +154,14 @@ class PackedIntegersDB:
     def search_by_ngram(self, ngram: bytes) -> List[Dict[str, Any]]:
         """Search for documents containing the specified 4-byte ngram"""
         try:
-            # Convert 4 bytes to packed integer
-            packed_int = self.pack_ngram(ngram)
-            print(f"Searching for packed integer: {packed_int}")
+            # Convert 4 bytes to hex
+            hex_ngram = binascii.hexlify(ngram).decode('ascii')
+            print(f"Searching for hex ngram: {hex_ngram}")
 
             query = {
                 "query": {
-                    "term": {
-                        "packed_ngram": packed_int
+                    "match": {
+                        "hex_ngram": hex_ngram
                     }
                 },
                 "_source": ["file_path", "file_sha256", "offset"]
@@ -189,18 +190,18 @@ class PackedIntegersDB:
 
 # Example usage
 if __name__ == "__main__":
-    # Initialize PackedIntegersDB
-    db = PackedIntegersDB()
+    # Initialize BinDB
+    bindb = BinDB()
     
     # Create index
-    db.create_index()
+    bindb.create_index()
     
     # Index sample file
     file_path = "data/random_binary_file_10MB.bin"
     file_sha256 = "sample_sha256"  # In real usage, calculate actual SHA256
     
     print("\nIndexing file...")
-    db.index_binary_file(file_path, file_sha256)
+    bindb.index_binary_file(file_path, file_sha256)
     
     # Sample searches
     print("\nPerforming sample searches...")
@@ -209,7 +210,7 @@ if __name__ == "__main__":
     with open(file_path, 'rb') as f:
         first_ngram = f.read(4)
     print("\nSearching for first 4 bytes of file:")
-    results = db.search_by_ngram(first_ngram)
+    results = bindb.search_by_ngram(first_ngram)
     print(f"Found {len(results)} matches")
     for result in results:
         print(f"File: {result['file_path']}, Offset: {result['offset']}")
@@ -217,7 +218,7 @@ if __name__ == "__main__":
     # Search for a specific pattern
     test_ngram = bytes([0xDE, 0xAD, 0xBE, 0xEF])  # DEADBEEF
     print("\nSearching for DEADBEEF pattern:")
-    results = db.search_by_ngram(test_ngram)
+    results = bindb.search_by_ngram(test_ngram)
     print(f"Found {len(results)} matches")
     for result in results:
         print(f"File: {result['file_path']}, Offset: {result['offset']}")
